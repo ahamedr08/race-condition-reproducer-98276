@@ -1,0 +1,71 @@
+#!/usr/bin/env bpftrace
+
+/*
+ * CVE-2026-98276
+ * Detect lost updates to SOCK_RCU_FREE and SOCK_TIMESTAMP.
+ */
+
+kprobe:sock_gettstamp
+/comm == "race1"/
+{
+    $sock = (struct socket *)arg0;
+    $sk = $sock->sk;
+    $key = (uint64)$sk;
+
+    @ts_calls = count();
+    @ts_cpu[$key] = cpu;
+}
+
+kprobe:udp_lib_get_port
+/comm == "race1"/
+{
+    $sk = (struct sock *)arg0;
+    $key = (uint64)$sk;
+
+    @udp_calls = count();
+    @udp_cpu[$key] = cpu;
+}
+
+kprobe:inet_release
+/comm == "race1"/
+{
+    $sock = (struct socket *)arg0;
+    $sk = $sock->sk;
+    $key = (uint64)$sk;
+
+    $flags = ((struct sock_common *)$sk)->skc_flags;
+
+    $rcu_mask = 0x800000;
+    $timestamp_mask = 0x80;
+    $missing = 0x800080 & (~$flags);
+
+    if ($missing != 0) {
+        @lost_updates = count();
+
+        if (($missing & $rcu_mask) != 0) {
+            @lost_rcu = count();
+
+            printf("[LOST UPDATE] socket=%lx flags=0x%lx lost_bit=SOCK_RCU_FREE missing=0x%lx timestamp_CPU=%d udp_port_CPU=%d PID=%d\n",
+                $key, $flags, $missing,
+                @ts_cpu[$key], @udp_cpu[$key], pid);
+        }
+
+        if (($missing & $timestamp_mask) != 0) {
+            @lost_timestamp = count();
+
+            printf("[LOST UPDATE] socket=%lx flags=0x%lx lost_bit=SOCK_TIMESTAMP missing=0x%lx timestamp_CPU=%d udp_port_CPU=%d PID=%d\n",
+                $key, $flags, $missing,
+                @ts_cpu[$key], @udp_cpu[$key], pid);
+        }
+    } else {
+        @both_present = count();
+    }
+
+    delete(@ts_cpu[$key]);
+    delete(@udp_cpu[$key]);
+}
+
+END
+{
+    printf("\n========== RACE DETECTION SUMMARY ==========\n");
+}

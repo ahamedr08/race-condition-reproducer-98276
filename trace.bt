@@ -6,7 +6,7 @@
  */
 
 kprobe:sock_gettstamp
-/comm == "race1"/
+/comm == "race"/
 {
     $sock = (struct socket *)arg0;
     $sk = $sock->sk;
@@ -17,7 +17,7 @@ kprobe:sock_gettstamp
 }
 
 kprobe:udp_lib_get_port
-/comm == "race1"/
+/comm == "race"/
 {
     $sk = (struct sock *)arg0;
     $key = (uint64)$sk;
@@ -27,7 +27,7 @@ kprobe:udp_lib_get_port
 }
 
 kprobe:inet_release
-/comm == "race1"/
+/comm == "race"/
 {
     $sock = (struct socket *)arg0;
     $sk = $sock->sk;
